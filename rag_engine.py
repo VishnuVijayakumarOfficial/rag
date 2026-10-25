@@ -2,6 +2,7 @@ import os
 import json
 from typing import List, Dict, Any, Optional
 import numpy as np
+import httpx
 from pypdf import PdfReader
 from docx import Document as DocxDocument
 from sentence_transformers import SentenceTransformer
@@ -314,7 +315,6 @@ User Request: {query}
     def _call_llm(self, prompt: str, context_str: str, query: str) -> str:
         if GROQ_API_KEY:
             try:
-                import httpx
                 response = httpx.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
@@ -340,5 +340,5 @@ User Request: {query}
             )
         else:
             return (
-                f"Please upload documents (PDF, DOCX, TXT) using the attachment icon below so I can search and extract answers from them for your query: **'{query}'**."
+                f"Please upload documents (PDF, DOCX, TXT) via the /api/upload endpoint so I can search and answer questions for: **'{query}'**."
             )

@@ -86,6 +86,11 @@ async def upload_documents(files: List[UploadFile] = File(...)):
                 "pages_parsed": len(pages_content)
             })
         except Exception as e:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
             uploaded_summary.append({
                 "filename": file.filename,
                 "status": "error",
