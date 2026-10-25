@@ -1,19 +1,33 @@
 import os
 import shutil
 from typing import List, Optional
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from rag_engine import DocumentProcessor, UnifiedVectorStore, RAGPipeline, DATA_DIR
 
+vector_store = UnifiedVectorStore()
+rag_pipeline = RAGPipeline(vector_store)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    if vector_store.pg_store:
+        vector_store.pg_store.close()
+    rag_pipeline.close()
+
+
 app = FastAPI(
     title="RAG Backend API",
     description="Minimal RAG system API with document ingestion and retrieval-augmented generation.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
-# CORS middleware for frontend / client communication
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,10 +35,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize vector store and RAG pipeline
-vector_store = UnifiedVectorStore()
-rag_pipeline = RAGPipeline(vector_store)
 
 
 class QueryRequest(BaseModel):
@@ -46,18 +56,20 @@ async def upload_documents(files: List[UploadFile] = File(...)):
             shutil.copyfileobj(file.file, buffer)
 
         try:
-            pages_content = DocumentProcessor.extract_text_from_file(file_path, file.filename)
-            chunks = DocumentProcessor.chunk_document(file.filename, pages_content)
+            def _ingest_file(fpath: str, fname: str):
+                pages_content = DocumentProcessor.extract_text_from_file(fpath, fname)
+                chunks = DocumentProcessor.chunk_document(fname, pages_content)
+                vector_store.delete_document(fname)
+                vector_store.add_documents(chunks)
+                return len(chunks), len(pages_content)
 
-            # Replace any previous chunk records for this document
-            vector_store.delete_document(file.filename)
-            vector_store.add_documents(chunks)
+            chunks_count, pages_count = await run_in_threadpool(_ingest_file, file_path, file.filename)
 
             uploaded_summary.append({
                 "filename": file.filename,
                 "status": "success",
-                "chunks_created": len(chunks),
-                "pages_parsed": len(pages_content)
+                "chunks_created": chunks_count,
+                "pages_parsed": pages_count
             })
         except Exception as e:
             if os.path.exists(file_path):
@@ -81,12 +93,16 @@ async def upload_documents(files: List[UploadFile] = File(...)):
 
 
 @app.post("/api/query", summary="Query the RAG pipeline")
-def process_query(req: QueryRequest):
-    """Retrieve relevant chunks from vector store and generate an answer using the RAG pipeline."""
+async def process_query(req: QueryRequest):
+    """Retrieve relevant chunks from vector store and generate an answer using the LLM pipeline."""
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    return rag_pipeline.generate_response(req.query, mode=req.mode or "RAG: Document Search")
+    return await run_in_threadpool(
+        rag_pipeline.generate_response,
+        req.query,
+        req.mode or "RAG: Document Search"
+    )
 
 
 if __name__ == "__main__":

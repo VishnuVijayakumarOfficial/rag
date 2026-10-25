@@ -25,8 +25,6 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 
 class DocumentProcessor:
-    """Parses files (PDF, DOCX, TXT) and splits them into metadata-rich text chunks."""
-
     @staticmethod
     def extract_text_from_file(file_path: str, filename: str) -> List[Dict[str, Any]]:
         ext = os.path.splitext(filename)[1].lower()
@@ -42,12 +40,14 @@ class DocumentProcessor:
         elif ext == ".docx":
             doc = DocxDocument(file_path)
             full_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-            pages_content.append({"page": 1, "text": full_text})
+            if full_text.strip():
+                pages_content.append({"page": 1, "text": full_text})
 
         elif ext in [".txt", ".md", ".json", ".csv"]:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 full_text = f.read()
-            pages_content.append({"page": 1, "text": full_text})
+            if full_text.strip():
+                pages_content.append({"page": 1, "text": full_text})
 
         else:
             raise ValueError(f"Unsupported file type: {ext}")
@@ -59,19 +59,18 @@ class DocumentProcessor:
         chunks = []
         doc_type = os.path.splitext(filename)[1].lower().replace(".", "")
         chunk_id = 0
+        step = max(chunk_size - overlap, 1)
 
         for item in pages_content:
             page_num = item["page"]
             text = item["text"]
+
             words = text.split()
-            if not words:
+            total_words = len(words)
+            if not total_words:
                 continue
 
-            step = chunk_size - overlap
-            if step <= 0:
-                step = chunk_size
-
-            for i in range(0, len(words), step):
+            for i in range(0, total_words, step):
                 chunk_words = words[i:i + chunk_size]
                 chunk_text = " ".join(chunk_words)
 
@@ -89,8 +88,6 @@ class DocumentProcessor:
 
 
 class FileVectorStore:
-    """Fallback local file-based vector store using Numpy."""
-
     def __init__(self):
         self.chunks: List[Dict[str, Any]] = []
         self.embeddings: Optional[np.ndarray] = None
@@ -112,7 +109,12 @@ class FileVectorStore:
             return []
 
         similarities = np.dot(self.embeddings, query_embedding)
-        top_indices = np.argsort(similarities)[::-1][:top_k]
+        
+        if len(self.chunks) <= top_k:
+            top_indices = np.argsort(similarities)[::-1]
+        else:
+            top_indices = np.argpartition(similarities, -top_k)[-top_k:]
+            top_indices = top_indices[np.argsort(similarities[top_indices])[::-1]]
 
         results = []
         for idx in top_indices:
@@ -164,13 +166,10 @@ class FileVectorStore:
 
 
 class UnifiedVectorStore:
-    """Dynamic Vector Store orchestrator supporting PostgreSQL vector DB & File Store fallback."""
-
     def __init__(self, model_name: str = EMBEDDING_MODEL_NAME):
         print(f"[RAG Engine] Loading Embedding Model ({model_name})...")
         self.embedding_model = SentenceTransformer(model_name)
         
-        # Initialize PostgreSQL vector store if configured
         self.active_backend = "file"
         self.pg_store: Optional[PostgresVectorStore] = None
         self.file_store = FileVectorStore()
@@ -190,7 +189,13 @@ class UnifiedVectorStore:
             return
 
         texts = [c["text"] for c in new_chunks]
-        embeddings = self.embedding_model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+        embeddings = self.embedding_model.encode(
+            texts,
+            batch_size=32,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True
+        )
 
         if self.active_backend == "postgres" and self.pg_store and self.pg_store.is_connected:
             self.pg_store.add_documents(new_chunks, embeddings)
@@ -198,7 +203,12 @@ class UnifiedVectorStore:
             self.file_store.add_documents(new_chunks, embeddings)
 
     def search(self, query: str, top_k: int = 4) -> List[Dict[str, Any]]:
-        query_embedding = self.embedding_model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
+        query_embedding = self.embedding_model.encode(
+            [query],
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True
+        )[0]
 
         if self.active_backend == "postgres" and self.pg_store and self.pg_store.is_connected:
             return self.pg_store.search(query_embedding, top_k=top_k)
@@ -238,10 +248,12 @@ class UnifiedVectorStore:
 
 
 class RAGPipeline:
-    """RAG Orchestrator handling context retrieval, source formatting, and LLM answer synthesis."""
-
     def __init__(self, vector_store: UnifiedVectorStore):
         self.vector_store = vector_store
+        self.http_client = httpx.Client(
+            timeout=httpx.Timeout(30.0, connect=5.0),
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        )
 
     def generate_response(self, query: str, mode: str = "RAG: Document Search") -> Dict[str, Any]:
         sources = []
@@ -303,14 +315,13 @@ User Request: {query}
     def _call_llm(self, prompt: str, context_str: str, query: str) -> str:
         if GROQ_API_KEY:
             try:
-                response = httpx.post(
+                response = self.http_client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
                     json={
                         "model": GROQ_MODEL,
                         "messages": [{"role": "user", "content": prompt}],
-                    },
-                    timeout=30.0
+                    }
                 )
                 data = response.json()
                 if "choices" in data:
@@ -331,3 +342,6 @@ User Request: {query}
             return (
                 f"Please upload documents (PDF, DOCX, TXT) via the /api/upload endpoint so I can search and answer questions for: **'{query}'**."
             )
+
+    def close(self):
+        self.http_client.close()

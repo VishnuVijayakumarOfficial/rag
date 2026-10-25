@@ -1,6 +1,8 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from contextlib import contextmanager
 import numpy as np
 import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import execute_values
 
 from config import (
@@ -8,45 +10,41 @@ from config import (
     POSTGRES_PORT,
     POSTGRES_DB,
     POSTGRES_USER,
-    POSTGRES_PASSWORD
+    POSTGRES_PASSWORD,
+    POSTGRES_MIN_POOL,
+    POSTGRES_MAX_POOL
 )
 
 
 class PostgresVectorStore:
-    """PostgreSQL Vector Store supporting pgvector extension and SQL cosine similarity."""
-
     def __init__(self, embedding_dimension: int = 384):
         self.dim = embedding_dimension
         self.is_connected = False
         self.has_pgvector = False
+        self.pool: Optional[pool.ThreadedConnectionPool] = None
         self._init_db()
 
-    def _get_server_connection(self):
-        """Connects to root postgres database to ensure target DB exists."""
-        return psycopg2.connect(
-            dbname="postgres",
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-            host=POSTGRES_HOST,
-            port=POSTGRES_PORT,
-            connect_timeout=3
-        )
-
-    def _get_db_connection(self):
-        """Connects to the application RAG database."""
-        return psycopg2.connect(
-            dbname=POSTGRES_DB,
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-            host=POSTGRES_HOST,
-            port=POSTGRES_PORT,
-            connect_timeout=3
-        )
+    @contextmanager
+    def _get_connection(self):
+        if not self.pool:
+            raise ConnectionError("Postgres connection pool is not initialized.")
+        conn = self.pool.getconn()
+        try:
+            conn.autocommit = True
+            yield conn
+        finally:
+            self.pool.putconn(conn)
 
     def _init_db(self):
         try:
-            # 1. Ensure target database exists
-            server_conn = self._get_server_connection()
+            server_conn = psycopg2.connect(
+                dbname="postgres",
+                user=POSTGRES_USER,
+                password=POSTGRES_PASSWORD,
+                host=POSTGRES_HOST,
+                port=POSTGRES_PORT,
+                connect_timeout=3
+            )
             server_conn.autocommit = True
             with server_conn.cursor() as cur:
                 cur.execute("SELECT 1 FROM pg_database WHERE datname = %s;", (POSTGRES_DB,))
@@ -55,37 +53,52 @@ class PostgresVectorStore:
                     cur.execute(f'CREATE DATABASE "{POSTGRES_DB}";')
             server_conn.close()
 
-            # 2. Connect to RAG DB and initialize tables / pgvector
-            conn = self._get_db_connection()
-            conn.autocommit = True
-            with conn.cursor() as cur:
-                # Try creating pgvector extension
-                try:
-                    cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-                    self.has_pgvector = True
-                    print("[Postgres] pgvector extension initialized.")
-                except Exception as ext_err:
-                    print(f"[Postgres] pgvector extension not installed; falling back to standard SQL vector array: {ext_err}")
-                    self.has_pgvector = False
+            self.pool = pool.ThreadedConnectionPool(
+                minconn=POSTGRES_MIN_POOL,
+                maxconn=POSTGRES_MAX_POOL,
+                dbname=POSTGRES_DB,
+                user=POSTGRES_USER,
+                password=POSTGRES_PASSWORD,
+                host=POSTGRES_HOST,
+                port=POSTGRES_PORT,
+                connect_timeout=3
+            )
 
-                # Create document_chunks table
-                emb_type = f"vector({self.dim})" if self.has_pgvector else "float8[]"
-                cur.execute(f"""
-                    CREATE TABLE IF NOT EXISTS document_chunks (
-                        id VARCHAR(255) PRIMARY KEY,
-                        filename VARCHAR(255) NOT NULL,
-                        page INT NOT NULL,
-                        doc_type VARCHAR(50) NOT NULL,
-                        chunk_text TEXT NOT NULL,
-                        embedding {emb_type},
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_chunks_filename ON document_chunks(filename);
-                """)
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    try:
+                        cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+                        self.has_pgvector = True
+                        print("[Postgres] pgvector extension initialized.")
+                    except Exception as ext_err:
+                        print(f"[Postgres] pgvector extension not installed; falling back to standard SQL vector array: {ext_err}")
+                        self.has_pgvector = False
 
-            conn.close()
+                    emb_type = f"vector({self.dim})" if self.has_pgvector else "float8[]"
+                    cur.execute(f"""
+                        CREATE TABLE IF NOT EXISTS document_chunks (
+                            id VARCHAR(255) PRIMARY KEY,
+                            filename VARCHAR(255) NOT NULL,
+                            page INT NOT NULL,
+                            doc_type VARCHAR(50) NOT NULL,
+                            chunk_text TEXT NOT NULL,
+                            embedding {emb_type},
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_chunks_filename ON document_chunks(filename);
+                    """)
+
+                    if self.has_pgvector:
+                        try:
+                            cur.execute("""
+                                CREATE INDEX IF NOT EXISTS idx_chunks_hnsw 
+                                ON document_chunks USING hnsw (embedding vector_cosine_ops);
+                            """)
+                        except Exception as idx_err:
+                            print(f"[Postgres] Note: HNSW index creation skipped: {idx_err}")
+
             self.is_connected = True
-            print(f"[Postgres] Connected to PostgreSQL database '{POSTGRES_DB}' successfully!")
+            print(f"[Postgres] Connected to PostgreSQL pool ('{POSTGRES_DB}') successfully!")
 
         except Exception as e:
             self.is_connected = False
@@ -95,23 +108,21 @@ class PostgresVectorStore:
         if not self.is_connected or not chunks:
             return
 
-        conn = self._get_db_connection()
-        conn.autocommit = True
-        try:
-            records = []
-            for chunk, emb in zip(chunks, embeddings):
-                emb_val = emb.tolist() if isinstance(emb, np.ndarray) else list(emb)
-                emb_repr = str(emb_val) if self.has_pgvector else emb_val
+        records = []
+        for chunk, emb in zip(chunks, embeddings):
+            emb_val = emb.tolist() if isinstance(emb, np.ndarray) else list(emb)
+            emb_repr = str(emb_val) if self.has_pgvector else emb_val
 
-                records.append((
-                    chunk["id"],
-                    chunk["filename"],
-                    chunk["page"],
-                    chunk.get("doc_type", "pdf"),
-                    chunk["text"],
-                    emb_repr
-                ))
+            records.append((
+                chunk["id"],
+                chunk["filename"],
+                chunk["page"],
+                chunk.get("doc_type", "pdf"),
+                chunk["text"],
+                emb_repr
+            ))
 
+        with self._get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
                     INSERT INTO document_chunks (id, filename, page, doc_type, chunk_text, embedding)
@@ -120,20 +131,16 @@ class PostgresVectorStore:
                         chunk_text = EXCLUDED.chunk_text,
                         embedding = EXCLUDED.embedding;
                 """
-                execute_values(cur, query, records)
+                execute_values(cur, query, records, page_size=200)
 
-            print(f"[Postgres] Inserted/Updated {len(records)} chunks in PostgreSQL.")
-        finally:
-            conn.close()
+        print(f"[Postgres] Inserted/Updated {len(records)} chunks in PostgreSQL.")
 
     def search(self, query_embedding: np.ndarray, top_k: int = 4) -> List[Dict[str, Any]]:
         if not self.is_connected:
             return []
 
-        conn = self._get_db_connection()
         results = []
-
-        try:
+        with self._get_connection() as conn:
             with conn.cursor() as cur:
                 if self.has_pgvector:
                     query_emb_list = query_embedding.tolist() if isinstance(query_embedding, np.ndarray) else list(query_embedding)
@@ -158,18 +165,20 @@ class PostgresVectorStore:
                                 "score": round(score, 4)
                             })
                 else:
-                    # Standard SQL / Numpy fallback for cosine similarity
                     cur.execute("SELECT id, filename, page, doc_type, chunk_text, embedding FROM document_chunks;")
                     rows = cur.fetchall()
                     if rows:
                         db_embeddings = np.array([r[5] for r in rows])
                         query_vec = np.asarray(query_embedding)
                         
-                        # Compute cosine similarity
                         sims = np.dot(db_embeddings, query_vec) / (
                             np.linalg.norm(db_embeddings, axis=1) * np.linalg.norm(query_vec) + 1e-10
                         )
-                        top_indices = np.argsort(sims)[::-1][:top_k]
+                        if len(rows) <= top_k:
+                            top_indices = np.argsort(sims)[::-1]
+                        else:
+                            top_indices = np.argpartition(sims, -top_k)[-top_k:]
+                            top_indices = top_indices[np.argsort(sims[top_indices])[::-1]]
 
                         for idx in top_indices:
                             score = float(sims[idx])
@@ -183,8 +192,6 @@ class PostgresVectorStore:
                                     "text": r[4],
                                     "score": round(score, 4)
                                 })
-        finally:
-            conn.close()
 
         return results
 
@@ -192,8 +199,7 @@ class PostgresVectorStore:
         if not self.is_connected:
             return []
 
-        conn = self._get_db_connection()
-        try:
+        with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT id, filename, page, doc_type, chunk_text FROM document_chunks;")
                 rows = cur.fetchall()
@@ -204,29 +210,24 @@ class PostgresVectorStore:
                     "doc_type": r[3],
                     "text": r[4]
                 } for r in rows]
-        finally:
-            conn.close()
 
     def delete_document(self, filename: str):
         if not self.is_connected:
             return
 
-        conn = self._get_db_connection()
-        conn.autocommit = True
-        try:
+        with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM document_chunks WHERE filename = %s;", (filename,))
-        finally:
-            conn.close()
 
     def clear(self):
         if not self.is_connected:
             return
 
-        conn = self._get_db_connection()
-        conn.autocommit = True
-        try:
+        with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("TRUNCATE TABLE document_chunks;")
-        finally:
-            conn.close()
+
+    def close(self):
+        if self.pool:
+            self.pool.closeall()
+            self.is_connected = False
