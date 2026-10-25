@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pypdf
+python-docx
+sentence-transformers
+numpy
+python-multipart
+python-dotenv
+httpx
+psycopg2-binary
+
