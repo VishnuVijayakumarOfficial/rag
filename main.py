@@ -3,7 +3,6 @@ import shutil
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 
 from rag_engine import DocumentProcessor, UnifiedVectorStore, RAGPipeline, DATA_DIR
@@ -14,31 +13,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Fix Swagger UI file upload rendering (forces binary format instead of array<string>)
-def custom_openapi():
-    if app.openapi_schema:
-        return app.openapi_schema
-    schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        routes=app.routes,
-    )
-    for component in schema.get("components", {}).get("schemas", {}).values():
-        for prop in component.get("properties", {}).values():
-            if prop.get("contentMediaType") == "application/octet-stream":
-                prop.pop("contentMediaType", None)
-                prop["format"] = "binary"
-            items = prop.get("items", {})
-            if items.get("contentMediaType") == "application/octet-stream":
-                items.pop("contentMediaType", None)
-                items["format"] = "binary"
-    app.openapi_schema = schema
-    return app.openapi_schema
-
-app.openapi = custom_openapi
-
-# CORS middleware for frontend / Swagger communication
+# CORS middleware for frontend / client communication
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -73,10 +48,9 @@ async def upload_documents(files: List[UploadFile] = File(...)):
         try:
             pages_content = DocumentProcessor.extract_text_from_file(file_path, file.filename)
             chunks = DocumentProcessor.chunk_document(file.filename, pages_content)
-            
-            # Delete any previous chunk records for this document
+
+            # Replace any previous chunk records for this document
             vector_store.delete_document(file.filename)
-            # Insert into vector store
             vector_store.add_documents(chunks)
 
             uploaded_summary.append({
@@ -112,8 +86,7 @@ def process_query(req: QueryRequest):
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    result = rag_pipeline.generate_response(req.query, mode=req.mode or "RAG: Document Search")
-    return result
+    return rag_pipeline.generate_response(req.query, mode=req.mode or "RAG: Document Search")
 
 
 if __name__ == "__main__":

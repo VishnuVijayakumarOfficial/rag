@@ -25,7 +25,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 
 class DocumentProcessor:
-    """Parses files (PDF, DOCX, TXT, MD) and splits them into metadata-rich text chunks."""
+    """Parses files (PDF, DOCX, TXT) and splits them into metadata-rich text chunks."""
 
     @staticmethod
     def extract_text_from_file(file_path: str, filename: str) -> List[Dict[str, Any]]:
@@ -39,7 +39,7 @@ class DocumentProcessor:
                 if text.strip():
                     pages_content.append({"page": page_num, "text": text.strip()})
 
-        elif ext in [".docx", ".doc"]:
+        elif ext == ".docx":
             doc = DocxDocument(file_path)
             full_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
             pages_content.append({"page": 1, "text": full_text})
@@ -91,8 +91,7 @@ class DocumentProcessor:
 class FileVectorStore:
     """Fallback local file-based vector store using Numpy."""
 
-    def __init__(self, embedding_model):
-        self.embedding_model = embedding_model
+    def __init__(self):
         self.chunks: List[Dict[str, Any]] = []
         self.embeddings: Optional[np.ndarray] = None
         self.load_index()
@@ -174,11 +173,12 @@ class UnifiedVectorStore:
         # Initialize PostgreSQL vector store if configured
         self.active_backend = "file"
         self.pg_store: Optional[PostgresVectorStore] = None
-        self.file_store = FileVectorStore(self.embedding_model)
+        self.file_store = FileVectorStore()
 
         if VECTOR_STORE_BACKEND == "postgres":
             print(f"[RAG Engine] Initializing PostgreSQL Vector Store on {POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}...")
-            self.pg_store = PostgresVectorStore(embedding_dimension=384)
+            dim = self.embedding_model.get_sentence_embedding_dimension() or 384
+            self.pg_store = PostgresVectorStore(embedding_dimension=dim)
             if self.pg_store.is_connected:
                 self.active_backend = "postgres"
                 print(f"[RAG Engine] Active Vector Store: PostgreSQL ({POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB})")
@@ -244,12 +244,12 @@ class RAGPipeline:
         self.vector_store = vector_store
 
     def generate_response(self, query: str, mode: str = "RAG: Document Search") -> Dict[str, Any]:
+        sources = []
         if mode == "RAG: Document Search":
             retrieved_chunks = self.vector_store.search(query, top_k=4)
 
             if not retrieved_chunks:
                 context_str = "No indexed documents found or no relevant context returned."
-                sources = []
             else:
                 context_str = "\n\n".join([f"--- Chunk from {c['filename']} (Page {c['page']}) ---\n{c['text']}" for c in retrieved_chunks])
                 
@@ -263,7 +263,6 @@ class RAGPipeline:
                     file_pages[fname]["pages"].add(page)
                     file_pages[fname]["snippets"].append(c["text"])
 
-                sources = []
                 for fname, data in file_pages.items():
                     sorted_pages = sorted(list(data["pages"]))
                     page_str = f"Page {sorted_pages[0]}" if len(sorted_pages) == 1 else f"Page {min(sorted_pages)} – {max(sorted_pages)}"
@@ -288,29 +287,18 @@ Instructions:
 - If the context does not contain enough information to answer the question, state politely that the uploaded documents do not mention this.
 """
             answer = self._call_llm(prompt, context_str, query)
-            if isinstance(answer, str):
-                answer = answer.replace("\u202f", " ").replace("\u00a0", " ").strip()
-
-            return {
-                "answer": answer,
-                "sources": sources,
-                "mode": mode
-            }
-
         else:
             prompt = f"""You are an AI assistant. Answer the user's request clearly and naturally using standard paragraphs or bullet points without markdown tables:
 
 User Request: {query}
 """
             answer = self._call_llm(prompt, "", query)
-            if isinstance(answer, str):
-                answer = answer.replace("\u202f", " ").replace("\u00a0", " ").strip()
 
-            return {
-                "answer": answer,
-                "sources": [],
-                "mode": mode
-            }
+        return {
+            "answer": answer,
+            "sources": sources,
+            "mode": mode
+        }
 
     def _call_llm(self, prompt: str, context_str: str, query: str) -> str:
         if GROQ_API_KEY:
@@ -326,7 +314,8 @@ User Request: {query}
                 )
                 data = response.json()
                 if "choices" in data:
-                    return data["choices"][0]["message"]["content"]
+                    content = data["choices"][0]["message"]["content"]
+                    return content.replace("\u202f", " ").replace("\u00a0", " ").strip()
                 else:
                     print(f"Groq API error: {data}")
             except Exception as e:
@@ -335,7 +324,7 @@ User Request: {query}
         if context_str and "No indexed documents found" not in context_str:
             return (
                 f"**Based on the retrieved document context:**\n\n"
-                f"{context_str.split('---')[1] if '---' in context_str else context_str}\n\n"
+                f"{context_str}\n\n"
                 f"*(Note: Powered by Python RAG similarity engine & PostgreSQL vector DB. Ensure a valid `GROQ_API_KEY` is set in `.env`.)*"
             )
         else:

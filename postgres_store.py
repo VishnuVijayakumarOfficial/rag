@@ -1,8 +1,7 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import numpy as np
 import psycopg2
 from psycopg2.extras import execute_values
-
 
 from config import (
     POSTGRES_HOST,
@@ -70,32 +69,19 @@ class PostgresVectorStore:
                     self.has_pgvector = False
 
                 # Create document_chunks table
-                if self.has_pgvector:
-                    cur.execute(f"""
-                        CREATE TABLE IF NOT EXISTS document_chunks (
-                            id VARCHAR(255) PRIMARY KEY,
-                            filename VARCHAR(255) NOT NULL,
-                            page INT NOT NULL,
-                            doc_type VARCHAR(50) NOT NULL,
-                            chunk_text TEXT NOT NULL,
-                            embedding vector({self.dim}),
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        );
-                        CREATE INDEX IF NOT EXISTS idx_chunks_filename ON document_chunks(filename);
-                    """)
-                else:
-                    cur.execute("""
-                        CREATE TABLE IF NOT EXISTS document_chunks (
-                            id VARCHAR(255) PRIMARY KEY,
-                            filename VARCHAR(255) NOT NULL,
-                            page INT NOT NULL,
-                            doc_type VARCHAR(50) NOT NULL,
-                            chunk_text TEXT NOT NULL,
-                            embedding float8[] NOT NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        );
-                        CREATE INDEX IF NOT EXISTS idx_chunks_filename ON document_chunks(filename);
-                    """)
+                emb_type = f"vector({self.dim})" if self.has_pgvector else "float8[]"
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS document_chunks (
+                        id VARCHAR(255) PRIMARY KEY,
+                        filename VARCHAR(255) NOT NULL,
+                        page INT NOT NULL,
+                        doc_type VARCHAR(50) NOT NULL,
+                        chunk_text TEXT NOT NULL,
+                        embedding {emb_type},
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_chunks_filename ON document_chunks(filename);
+                """)
 
             conn.close()
             self.is_connected = True
@@ -115,11 +101,7 @@ class PostgresVectorStore:
             records = []
             for chunk, emb in zip(chunks, embeddings):
                 emb_val = emb.tolist() if isinstance(emb, np.ndarray) else list(emb)
-                if self.has_pgvector:
-                    # pgvector expects string representation like '[0.1, 0.2, ...]'
-                    emb_repr = str(emb_val)
-                else:
-                    emb_repr = emb_val
+                emb_repr = str(emb_val) if self.has_pgvector else emb_val
 
                 records.append((
                     chunk["id"],
@@ -149,12 +131,12 @@ class PostgresVectorStore:
             return []
 
         conn = self._get_db_connection()
-        query_emb_list = query_embedding.tolist() if isinstance(query_embedding, np.ndarray) else list(query_embedding)
         results = []
 
         try:
             with conn.cursor() as cur:
                 if self.has_pgvector:
+                    query_emb_list = query_embedding.tolist() if isinstance(query_embedding, np.ndarray) else list(query_embedding)
                     emb_str = str(query_emb_list)
                     cur.execute("""
                         SELECT id, filename, page, doc_type, chunk_text,
@@ -176,12 +158,12 @@ class PostgresVectorStore:
                                 "score": round(score, 4)
                             })
                 else:
-                    # Pure SQL / Numpy fallback for cosine similarity
+                    # Standard SQL / Numpy fallback for cosine similarity
                     cur.execute("SELECT id, filename, page, doc_type, chunk_text, embedding FROM document_chunks;")
                     rows = cur.fetchall()
                     if rows:
                         db_embeddings = np.array([r[5] for r in rows])
-                        query_vec = np.array(query_emb_list)
+                        query_vec = np.asarray(query_embedding)
                         
                         # Compute cosine similarity
                         sims = np.dot(db_embeddings, query_vec) / (
