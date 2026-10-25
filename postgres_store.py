@@ -108,19 +108,18 @@ class PostgresVectorStore:
         if not self.is_connected or not chunks:
             return
 
-        records = []
-        for chunk, emb in zip(chunks, embeddings):
-            emb_val = emb.tolist() if isinstance(emb, np.ndarray) else list(emb)
-            emb_repr = str(emb_val) if self.has_pgvector else emb_val
-
-            records.append((
+        emb_list = embeddings.tolist() if isinstance(embeddings, np.ndarray) else embeddings
+        records = [
+            (
                 chunk["id"],
                 chunk["filename"],
                 chunk["page"],
                 chunk.get("doc_type", "pdf"),
                 chunk["text"],
-                emb_repr
-            ))
+                str(emb) if self.has_pgvector else emb
+            )
+            for chunk, emb in zip(chunks, emb_list)
+        ]
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
@@ -139,11 +138,10 @@ class PostgresVectorStore:
         if not self.is_connected:
             return []
 
-        results = []
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 if self.has_pgvector:
-                    query_emb_list = query_embedding.tolist() if isinstance(query_embedding, np.ndarray) else list(query_embedding)
+                    query_emb_list = query_embedding.tolist() if isinstance(query_embedding, np.ndarray) else query_embedding
                     emb_str = str(query_emb_list)
                     cur.execute("""
                         SELECT id, filename, page, doc_type, chunk_text,
@@ -153,9 +151,41 @@ class PostgresVectorStore:
                         LIMIT %s;
                     """, (emb_str, emb_str, top_k))
                     rows = cur.fetchall()
-                    for r in rows:
-                        score = float(r[5])
+                    return [
+                        {
+                            "id": cid,
+                            "filename": fn,
+                            "page": pg,
+                            "doc_type": dt,
+                            "text": txt,
+                            "score": round(float(sim), 4)
+                        }
+                        for cid, fn, pg, dt, txt, sim in rows
+                        if float(sim) > 0.15
+                    ]
+                else:
+                    cur.execute("SELECT id, filename, page, doc_type, chunk_text, embedding FROM document_chunks;")
+                    rows = cur.fetchall()
+                    if not rows:
+                        return []
+
+                    db_embeddings = np.array([r[5] for r in rows])
+                    query_vec = np.asarray(query_embedding)
+                    
+                    sims = np.dot(db_embeddings, query_vec) / (
+                        np.linalg.norm(db_embeddings, axis=1) * np.linalg.norm(query_vec) + 1e-10
+                    )
+                    if len(rows) <= top_k:
+                        top_indices = np.argsort(sims)[::-1]
+                    else:
+                        top_indices = np.argpartition(sims, -top_k)[-top_k:]
+                        top_indices = top_indices[np.argsort(sims[top_indices])[::-1]]
+
+                    results = []
+                    for idx in top_indices:
+                        score = float(sims[idx])
                         if score > 0.15:
+                            r = rows[idx]
                             results.append({
                                 "id": r[0],
                                 "filename": r[1],
@@ -164,36 +194,7 @@ class PostgresVectorStore:
                                 "text": r[4],
                                 "score": round(score, 4)
                             })
-                else:
-                    cur.execute("SELECT id, filename, page, doc_type, chunk_text, embedding FROM document_chunks;")
-                    rows = cur.fetchall()
-                    if rows:
-                        db_embeddings = np.array([r[5] for r in rows])
-                        query_vec = np.asarray(query_embedding)
-                        
-                        sims = np.dot(db_embeddings, query_vec) / (
-                            np.linalg.norm(db_embeddings, axis=1) * np.linalg.norm(query_vec) + 1e-10
-                        )
-                        if len(rows) <= top_k:
-                            top_indices = np.argsort(sims)[::-1]
-                        else:
-                            top_indices = np.argpartition(sims, -top_k)[-top_k:]
-                            top_indices = top_indices[np.argsort(sims[top_indices])[::-1]]
-
-                        for idx in top_indices:
-                            score = float(sims[idx])
-                            if score > 0.15:
-                                r = rows[idx]
-                                results.append({
-                                    "id": r[0],
-                                    "filename": r[1],
-                                    "page": r[2],
-                                    "doc_type": r[3],
-                                    "text": r[4],
-                                    "score": round(score, 4)
-                                })
-
-        return results
+                    return results
 
     def get_all_chunks(self) -> List[Dict[str, Any]]:
         if not self.is_connected:
@@ -203,13 +204,16 @@ class PostgresVectorStore:
             with conn.cursor() as cur:
                 cur.execute("SELECT id, filename, page, doc_type, chunk_text FROM document_chunks;")
                 rows = cur.fetchall()
-                return [{
-                    "id": r[0],
-                    "filename": r[1],
-                    "page": r[2],
-                    "doc_type": r[3],
-                    "text": r[4]
-                } for r in rows]
+                return [
+                    {
+                        "id": cid,
+                        "filename": fn,
+                        "page": pg,
+                        "doc_type": dt,
+                        "text": txt
+                    }
+                    for cid, fn, pg, dt, txt in rows
+                ]
 
     def delete_document(self, filename: str):
         if not self.is_connected:

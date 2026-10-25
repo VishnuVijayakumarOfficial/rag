@@ -23,6 +23,8 @@ STORE_FILE = os.path.join(DATA_DIR, "vector_store.json")
 EMBEDDINGS_FILE = os.path.join(DATA_DIR, "embeddings.npy")
 os.makedirs(DATA_DIR, exist_ok=True)
 
+UNICODE_TRANSLATION = str.maketrans({"\u202f": " ", "\u00a0": " "})
+
 
 class DocumentProcessor:
     @staticmethod
@@ -70,11 +72,24 @@ class DocumentProcessor:
             if not total_words:
                 continue
 
+            if total_words <= chunk_size:
+                chunk_text = " ".join(words)
+                if len(chunk_text) > 20:
+                    chunk_id += 1
+                    chunks.append({
+                        "id": f"{filename}_p{page_num}_c{chunk_id}",
+                        "filename": filename,
+                        "page": page_num,
+                        "text": chunk_text,
+                        "doc_type": doc_type
+                    })
+                continue
+
             for i in range(0, total_words, step):
                 chunk_words = words[i:i + chunk_size]
                 chunk_text = " ".join(chunk_words)
 
-                if len(chunk_text.strip()) > 20:
+                if len(chunk_text) > 20:
                     chunk_id += 1
                     chunks.append({
                         "id": f"{filename}_p{page_num}_c{chunk_id}",
@@ -120,9 +135,7 @@ class FileVectorStore:
         for idx in top_indices:
             score = float(similarities[idx])
             if score > 0.15:
-                chunk_item = dict(self.chunks[idx])
-                chunk_item["score"] = round(score, 4)
-                results.append(chunk_item)
+                results.append({**self.chunks[idx], "score": round(score, 4)})
 
         return results
 
@@ -191,7 +204,7 @@ class UnifiedVectorStore:
         texts = [c["text"] for c in new_chunks]
         embeddings = self.embedding_model.encode(
             texts,
-            batch_size=32,
+            batch_size=min(len(texts), 64),
             show_progress_bar=False,
             convert_to_numpy=True,
             normalize_embeddings=True
@@ -204,11 +217,11 @@ class UnifiedVectorStore:
 
     def search(self, query: str, top_k: int = 4) -> List[Dict[str, Any]]:
         query_embedding = self.embedding_model.encode(
-            [query],
+            query,
             show_progress_bar=False,
             convert_to_numpy=True,
             normalize_embeddings=True
-        )[0]
+        )
 
         if self.active_backend == "postgres" and self.pg_store and self.pg_store.is_connected:
             return self.pg_store.search(query_embedding, top_k=top_k)
@@ -263,21 +276,27 @@ class RAGPipeline:
             if not retrieved_chunks:
                 context_str = "No indexed documents found or no relevant context returned."
             else:
-                context_str = "\n\n".join([f"--- Chunk from {c['filename']} (Page {c['page']}) ---\n{c['text']}" for c in retrieved_chunks])
-                
+                context_parts = []
                 file_pages: Dict[str, Dict[str, Any]] = {}
+
                 for c in retrieved_chunks:
                     fname = c["filename"]
                     page = c["page"]
+                    text = c["text"]
                     ftype = c.get("doc_type", "pdf")
+
+                    context_parts.append(f"--- Chunk from {fname} (Page {page}) ---\n{text}")
+
                     if fname not in file_pages:
                         file_pages[fname] = {"type": ftype, "pages": set(), "snippets": []}
                     file_pages[fname]["pages"].add(page)
-                    file_pages[fname]["snippets"].append(c["text"])
+                    file_pages[fname]["snippets"].append(text)
+
+                context_str = "\n\n".join(context_parts)
 
                 for fname, data in file_pages.items():
-                    sorted_pages = sorted(list(data["pages"]))
-                    page_str = f"Page {sorted_pages[0]}" if len(sorted_pages) == 1 else f"Page {min(sorted_pages)} – {max(sorted_pages)}"
+                    sorted_pages = sorted(data["pages"])
+                    page_str = f"Page {sorted_pages[0]}" if len(sorted_pages) == 1 else f"Page {sorted_pages[0]} – {sorted_pages[-1]}"
                     sources.append({
                         "filename": fname,
                         "pages": page_str,
@@ -326,7 +345,7 @@ User Request: {query}
                 data = response.json()
                 if "choices" in data:
                     content = data["choices"][0]["message"]["content"]
-                    return content.replace("\u202f", " ").replace("\u00a0", " ").strip()
+                    return content.translate(UNICODE_TRANSLATION).strip()
                 else:
                     print(f"Groq API error: {data}")
             except Exception as e:

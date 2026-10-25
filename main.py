@@ -42,6 +42,16 @@ class QueryRequest(BaseModel):
     mode: Optional[str] = "RAG: Document Search"
 
 
+def _save_and_ingest(file_obj, file_path: str, filename: str):
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file_obj, buffer)
+    pages_content = DocumentProcessor.extract_text_from_file(file_path, filename)
+    chunks = DocumentProcessor.chunk_document(filename, pages_content)
+    vector_store.delete_document(filename)
+    vector_store.add_documents(chunks)
+    return len(chunks), len(pages_content)
+
+
 @app.post("/api/upload", summary="Upload and index documents for RAG")
 async def upload_documents(files: List[UploadFile] = File(...)):
     """Upload documents (.pdf, .docx, .txt), extract text, split into chunks, and index into vector store."""
@@ -52,18 +62,11 @@ async def upload_documents(files: List[UploadFile] = File(...)):
             continue
 
         file_path = os.path.join(DATA_DIR, file.filename)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
 
         try:
-            def _ingest_file(fpath: str, fname: str):
-                pages_content = DocumentProcessor.extract_text_from_file(fpath, fname)
-                chunks = DocumentProcessor.chunk_document(fname, pages_content)
-                vector_store.delete_document(fname)
-                vector_store.add_documents(chunks)
-                return len(chunks), len(pages_content)
-
-            chunks_count, pages_count = await run_in_threadpool(_ingest_file, file_path, file.filename)
+            chunks_count, pages_count = await run_in_threadpool(
+                _save_and_ingest, file.file, file_path, file.filename
+            )
 
             uploaded_summary.append({
                 "filename": file.filename,
