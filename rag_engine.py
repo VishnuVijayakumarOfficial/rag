@@ -26,6 +26,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 UNICODE_TRANSLATION = str.maketrans({"\u202f": " ", "\u00a0": " "})
 
 
+# this is the nlp based code
 class DocumentProcessor:
     @staticmethod
     def extract_text_from_file(file_path: str, filename: str) -> List[Dict[str, Any]]:
@@ -56,6 +57,7 @@ class DocumentProcessor:
 
         return pages_content
 
+    # this is the tokenization based code
     @staticmethod
     def chunk_document(filename: str, pages_content: List[Dict[str, Any]], chunk_size: int = 500, overlap: int = 100) -> List[Dict[str, Any]]:
         chunks = []
@@ -67,6 +69,7 @@ class DocumentProcessor:
             page_num = item["page"]
             text = item["text"]
 
+            # this is where split the input into tokens
             words = text.split()
             total_words = len(words)
             if not total_words:
@@ -178,9 +181,11 @@ class FileVectorStore:
                 self.clear()
 
 
+# this is the embedding based code
 class UnifiedVectorStore:
     def __init__(self, model_name: str = EMBEDDING_MODEL_NAME):
         print(f"[RAG Engine] Loading Embedding Model ({model_name})...")
+        # this is the transformer layer based code
         self.embedding_model = SentenceTransformer(model_name)
         
         self.active_backend = "file"
@@ -202,6 +207,7 @@ class UnifiedVectorStore:
             return
 
         texts = [c["text"] for c in new_chunks]
+        # this is where convert each token as numerical vector
         embeddings = self.embedding_model.encode(
             texts,
             batch_size=min(len(texts), 64),
@@ -215,6 +221,7 @@ class UnifiedVectorStore:
         else:
             self.file_store.add_documents(new_chunks, embeddings)
 
+    # this is where semantic search is working
     def search(self, query: str, top_k: int = 4) -> List[Dict[str, Any]]:
         query_embedding = self.embedding_model.encode(
             query,
@@ -260,6 +267,7 @@ class UnifiedVectorStore:
         }
 
 
+# this is the llm based code
 class RAGPipeline:
     def __init__(self, vector_store: UnifiedVectorStore):
         self.vector_store = vector_store
@@ -334,6 +342,7 @@ User Request: {query}
     def _call_llm(self, prompt: str, context_str: str, query: str) -> str:
         if GROQ_API_KEY:
             try:
+                # this is the token probability select next token code
                 response = self.http_client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
