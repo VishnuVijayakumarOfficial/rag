@@ -8,9 +8,11 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from rag_engine import DocumentProcessor, UnifiedVectorStore, RAGPipeline, DATA_DIR
+from advanced_rag_engine import AdvancedRAGPipeline
 
 vector_store = UnifiedVectorStore()
 rag_pipeline = RAGPipeline(vector_store)
+advanced_rag_pipeline = AdvancedRAGPipeline(vector_store)
 
 
 @asynccontextmanager
@@ -19,6 +21,7 @@ async def lifespan(app: FastAPI):
     if vector_store.pg_store:
         vector_store.pg_store.close()
     rag_pipeline.close()
+    advanced_rag_pipeline.close()
 
 
 app = FastAPI(
@@ -40,6 +43,13 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     query: str
     mode: Optional[str] = "RAG: Document Search"
+
+
+class AdvancedQueryRequest(BaseModel):
+    query: str
+    use_hyde: Optional[bool] = True
+    use_multi_query: Optional[bool] = True
+    top_k: Optional[int] = 4
 
 
 def _save_and_ingest(file_obj, file_path: str, filename: str):
@@ -105,6 +115,21 @@ async def process_query(req: QueryRequest):
         rag_pipeline.generate_response,
         req.query,
         req.mode or "RAG: Document Search"
+    )
+
+
+@app.post("/api/advanced/query", summary="Query the Advanced RAG pipeline")
+async def process_advanced_query(req: AdvancedQueryRequest):
+    """Query using Advanced RAG: Multi-query expansion, HyDE, candidate deduplication, and semantic re-ranking."""
+    if not req.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+
+    return await run_in_threadpool(
+        advanced_rag_pipeline.generate_advanced_response,
+        req.query,
+        req.use_hyde if req.use_hyde is not None else True,
+        req.use_multi_query if req.use_multi_query is not None else True,
+        req.top_k or 4
     )
 
 
