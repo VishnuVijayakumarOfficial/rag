@@ -1,0 +1,402 @@
+{
+  "nodes": {
+    "explore india india": {
+      "id": "explore india india",
+      "name": "Explore India India",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    "this": {
+      "id": "this",
+      "name": "This",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    "taj mahal": {
+      "id": "taj mahal",
+      "name": "Taj Mahal",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    "agra": {
+      "id": "agra",
+      "name": "Agra",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    "uttar pradesh": {
+      "id": "uttar pradesh",
+      "name": "Uttar Pradesh",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    "world heritage site": {
+      "id": "world heritage site",
+      "name": "World Heritage Site",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    "ooty": {
+      "id": "ooty",
+      "name": "Ooty",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    "tamil nadu": {
+      "id": "tamil nadu",
+      "name": "Tamil Nadu",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    "nilgiri": {
+      "id": "nilgiri",
+      "name": "Nilgiri",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    "nilgiri mountain railway": {
+      "id": "nilgiri mountain railway",
+      "name": "Nilgiri Mountain Railway",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    "mahabalipuram": {
+      "id": "mahabalipuram",
+      "name": "Mahabalipuram",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    "mumbai": {
+      "id": "mumbai",
+      "name": "Mumbai",
+      "type": "Entity",
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    "shillong": {
+      "id": "shillong",
+      "name": "Shillong",
+      "type": "City",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "meghalaya": {
+      "id": "meghalaya",
+      "name": "Meghalaya",
+      "type": "State",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "cellular jail": {
+      "id": "cellular jail",
+      "name": "Cellular Jail",
+      "type": "Landmark",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "port blair": {
+      "id": "port blair",
+      "name": "Port Blair",
+      "type": "City",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "andaman islands": {
+      "id": "andaman islands",
+      "name": "Andaman Islands",
+      "type": "IslandGroup",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "dal lake": {
+      "id": "dal lake",
+      "name": "Dal Lake",
+      "type": "Landmark",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "srinagar": {
+      "id": "srinagar",
+      "name": "Srinagar",
+      "type": "City",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "jammu and kashmir": {
+      "id": "jammu and kashmir",
+      "name": "Jammu and Kashmir",
+      "type": "State",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "charminar": {
+      "id": "charminar",
+      "name": "Charminar",
+      "type": "Landmark",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "hyderabad": {
+      "id": "hyderabad",
+      "name": "Hyderabad",
+      "type": "City",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "golconda fort": {
+      "id": "golconda fort",
+      "name": "Golconda Fort",
+      "type": "Landmark",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "telangana": {
+      "id": "telangana",
+      "name": "Telangana",
+      "type": "State",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "ahmedabad": {
+      "id": "ahmedabad",
+      "name": "Ahmedabad",
+      "type": "City",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "gujarat": {
+      "id": "gujarat",
+      "name": "Gujarat",
+      "type": "State",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    "stepwell": {
+      "id": "stepwell",
+      "name": "Stepwell",
+      "type": "Landmark",
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    }
+  },
+  "edges": [
+    {
+      "source": "explore india india",
+      "target": "this",
+      "relation": "ASSOCIATED_WITH",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    {
+      "source": "this",
+      "target": "taj mahal",
+      "relation": "ASSOCIATED_WITH",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    {
+      "source": "taj mahal",
+      "target": "agra",
+      "relation": "ASSOCIATED_WITH",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    {
+      "source": "agra",
+      "target": "uttar pradesh",
+      "relation": "ASSOCIATED_WITH",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    {
+      "source": "uttar pradesh",
+      "target": "world heritage site",
+      "relation": "ASSOCIATED_WITH",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p1_c1"
+      ]
+    },
+    {
+      "source": "ooty",
+      "target": "tamil nadu",
+      "relation": "ASSOCIATED_WITH",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    {
+      "source": "tamil nadu",
+      "target": "nilgiri",
+      "relation": "ASSOCIATED_WITH",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    {
+      "source": "nilgiri",
+      "target": "nilgiri mountain railway",
+      "relation": "ASSOCIATED_WITH",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    {
+      "source": "nilgiri mountain railway",
+      "target": "mahabalipuram",
+      "relation": "ASSOCIATED_WITH",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    {
+      "source": "mahabalipuram",
+      "target": "mumbai",
+      "relation": "ASSOCIATED_WITH",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p2_c2"
+      ]
+    },
+    {
+      "source": "shillong",
+      "target": "meghalaya",
+      "relation": "LOCATED_IN",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    {
+      "source": "cellular jail",
+      "target": "port blair",
+      "relation": "LOCATED_IN",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    {
+      "source": "port blair",
+      "target": "andaman islands",
+      "relation": "LOCATED_IN",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    {
+      "source": "dal lake",
+      "target": "srinagar",
+      "relation": "LOCATED_IN",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    {
+      "source": "srinagar",
+      "target": "jammu and kashmir",
+      "relation": "LOCATED_IN",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    {
+      "source": "charminar",
+      "target": "hyderabad",
+      "relation": "LOCATED_IN",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    {
+      "source": "golconda fort",
+      "target": "hyderabad",
+      "relation": "LOCATED_IN",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    {
+      "source": "hyderabad",
+      "target": "telangana",
+      "relation": "LOCATED_IN",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    {
+      "source": "ahmedabad",
+      "target": "gujarat",
+      "relation": "LOCATED_IN",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    },
+    {
+      "source": "stepwell",
+      "target": "ahmedabad",
+      "relation": "LOCATED_IN",
+      "weight": 1,
+      "chunks": [
+        "tourist_places_in_india.pdf_p3_c3"
+      ]
+    }
+  ]
+}

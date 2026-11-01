@@ -6,15 +6,18 @@ from config import GROQ_API_KEY, GROQ_MODEL
 from rag_engine import UnifiedVectorStore, UNICODE_TRANSLATION
 
 
+# this is the advanced rag based code
 class AdvancedRAGPipeline:
     def __init__(self, vector_store: UnifiedVectorStore):
         self.vector_store = vector_store
+        # this is the transformer layer based code
         self.embedding_model = vector_store.embedding_model
         self.http_client = httpx.Client(
             timeout=httpx.Timeout(30.0, connect=5.0),
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
         )
 
+    # this is the llm based code
     def _call_llm(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         if not GROQ_API_KEY:
             return ""
@@ -25,6 +28,7 @@ class AdvancedRAGPipeline:
         messages.append({"role": "user", "content": prompt})
 
         try:
+            # this is the token probability select next token code
             response = self.http_client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
@@ -67,6 +71,39 @@ class AdvancedRAGPipeline:
         )
         return self._call_llm(prompt)
 
+    def _keyword_search(self, query: str, top_k: int = 4) -> List[Dict[str, Any]]:
+        words = [w.lower() for w in query.split() if len(w) > 2]
+        if not words:
+            return []
+
+        all_chunks = self.vector_store.get_all_chunks()
+        scored = []
+        for c in all_chunks:
+            text_lower = c["text"].lower()
+            matches = sum(1 for w in words if w in text_lower)
+            if matches > 0:
+                scored.append({
+                    **c,
+                    "keyword_score": round(matches / len(words), 4)
+                })
+
+        scored.sort(key=lambda x: x["keyword_score"], reverse=True)
+        return scored[:top_k]
+
+    # this is the vector search + keyword search code
+    def hybrid_search(self, query: str, top_k: int = 4) -> List[Dict[str, Any]]:
+        vector_results = self.vector_store.search(query, top_k=top_k * 2)
+        keyword_results = self._keyword_search(query, top_k=top_k * 2)
+
+        candidate_map: Dict[str, Dict[str, Any]] = {}
+        for c in vector_results:
+            candidate_map[c["id"]] = c
+        for c in keyword_results:
+            if c["id"] not in candidate_map:
+                candidate_map[c["id"]] = c
+
+        return self._rerank_chunks(query, list(candidate_map.values()), top_k=top_k)
+
     def _rerank_chunks(self, query: str, candidates: List[Dict[str, Any]], top_k: int = 4) -> List[Dict[str, Any]]:
         if not candidates:
             return []
@@ -79,6 +116,7 @@ class AdvancedRAGPipeline:
         )
 
         texts = [c["text"] for c in candidates]
+        # this is where convert each token as numerical vector
         chunk_embs = self.embedding_model.encode(
             texts,
             batch_size=min(len(texts), 64),
@@ -87,7 +125,6 @@ class AdvancedRAGPipeline:
             normalize_embeddings=True
         )
 
-        # Vectorized cosine similarity re-scoring
         similarities = np.dot(chunk_embs, query_emb)
 
         scored_candidates = []
@@ -99,7 +136,6 @@ class AdvancedRAGPipeline:
                     "relevance_score": round(score_val, 4)
                 })
 
-        # Sort descending by re-ranked similarity
         scored_candidates.sort(key=lambda x: x["relevance_score"], reverse=True)
         return scored_candidates[:top_k]
 
@@ -108,34 +144,40 @@ class AdvancedRAGPipeline:
         query: str,
         use_hyde: bool = True,
         use_multi_query: bool = True,
+        use_keyword_search: bool = True,
         top_k: int = 4
     ) -> Dict[str, Any]:
         retrieval_queries = [query]
         expanded_queries = []
         hyde_passage = ""
 
-        # 1. Multi-Query Expansion
         if use_multi_query and GROQ_API_KEY:
             expanded_queries = self._generate_multi_queries(query)
             retrieval_queries.extend(expanded_queries)
 
-        # 2. Hypothetical Document Embeddings (HyDE)
         if use_hyde and GROQ_API_KEY:
             hyde_passage = self._generate_hyde_passage(query)
             if hyde_passage:
                 retrieval_queries.append(hyde_passage)
 
-        # 3. Multi-Pass Retrieval & Deduplication
+        # this is the vector search + keyword search code
         candidate_map: Dict[str, Dict[str, Any]] = {}
         for q in retrieval_queries:
+            # this is where semantic search is working
             chunks = self.vector_store.search(q, top_k=top_k * 2)
             for c in chunks:
                 if c["id"] not in candidate_map:
                     candidate_map[c["id"]] = c
 
-        all_candidates = list(candidate_map.values())
+        keyword_matches_count = 0
+        if use_keyword_search:
+            keyword_chunks = self._keyword_search(query, top_k=top_k * 2)
+            keyword_matches_count = len(keyword_chunks)
+            for c in keyword_chunks:
+                if c["id"] not in candidate_map:
+                    candidate_map[c["id"]] = c
 
-        # 4. Cross-Score Re-Ranking & Context Filtering
+        all_candidates = list(candidate_map.values())
         reranked_chunks = self._rerank_chunks(query, all_candidates, top_k=top_k)
 
         if not reranked_chunks:
@@ -145,13 +187,14 @@ class AdvancedRAGPipeline:
                 "advanced_metadata": {
                     "expanded_queries": expanded_queries,
                     "hyde_applied": bool(hyde_passage),
+                    "keyword_search_applied": use_keyword_search,
+                    "keyword_matches_found": keyword_matches_count,
                     "candidates_evaluated": len(all_candidates),
                     "reranked_selected": 0,
                     "average_confidence": 0.0
                 }
             }
 
-        # 5. Grounded Context Construction with Source Tags
         context_blocks = []
         sources = []
         for idx, chunk in enumerate(reranked_chunks, start=1):
@@ -168,10 +211,9 @@ class AdvancedRAGPipeline:
 
         context_str = "\n\n".join(context_blocks)
         avg_confidence = round(
-            float(np.mean([s["relevance_score"] for s in sources])), 4
+            sum(s["relevance_score"] for s in sources) / len(sources), 4
         ) if sources else 0.0
 
-        # 6. Advanced Grounded Synthesis Prompt
         system_prompt = (
             "You are an Advanced RAG Intelligence Agent. "
             "Synthesize comprehensive, logically structured answers based strictly on the provided document sources. "
@@ -192,7 +234,6 @@ Instructions:
 
         answer = self._call_llm(user_prompt, system_prompt=system_prompt)
         if not answer:
-            # Extractive fallback if LLM API is unavailable
             answer = (
                 f"**Based on the top re-ranked document context ({sources[0]['filename']} - Page {sources[0]['page']}):**\n\n"
                 f"{reranked_chunks[0]['text']}\n\n"
@@ -205,6 +246,8 @@ Instructions:
             "advanced_metadata": {
                 "expanded_queries": expanded_queries,
                 "hyde_applied": bool(hyde_passage),
+                "keyword_search_applied": use_keyword_search,
+                "keyword_matches_found": keyword_matches_count,
                 "candidates_evaluated": len(all_candidates),
                 "reranked_selected": len(reranked_chunks),
                 "average_confidence": avg_confidence

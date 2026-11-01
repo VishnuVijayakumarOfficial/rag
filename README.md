@@ -18,6 +18,11 @@ A FastAPI backend for document ingestion, text chunking, vector embedding, and r
   - **Multi-Pass Retrieval & Deduplication**: Merges multi-query and HyDE candidate pools without duplicate chunks.
   - **Re-Ranking & Relevance Filtering**: Re-scores candidate chunks with vector similarity and filters low-confidence context.
   - **Bracketed Source Citations**: Outputs inline references (`[Source 1]`) and confidence metrics (`/api/advanced/query`).
+- **Graph RAG Pipeline**:
+  - **Entity & Relation Extraction**: Extracts structured knowledge graph entities and directional relationship edges from text.
+  - **Subgraph Traversal**: Performs multi-hop BFS neighbor expansion around query seed entities.
+  - **Graph + Chunk Fusion**: Synthesizes answers combining structured relational triplets with textual document chunks (`/api/graph/query`).
+  - **Graph Inspection**: Endpoint to view and inspect all nodes, edges, and connections in the graph (`/api/graph/data`).
 - **FastAPI Endpoints**: REST API with interactive Swagger UI documentation.
 
 ---
@@ -72,3 +77,7 @@ uvicorn main:app --reload --port 8000
 - **`POST /api/upload`**: Upload documents (`.pdf`, `.docx`, `.txt`) to index into the vector database.
 - **`POST /api/query`**: Native RAG query with standard top-k similarity retrieval.
 - **`POST /api/advanced/query`**: Advanced RAG query featuring Multi-Query expansion, HyDE, candidate deduplication, and semantic re-ranking.
+- **`POST /api/advanced/hybrid-search`**: Hybrid search combining Vector Search + Keyword Search with semantic re-ranking.
+- **`POST /api/graph/query`**: Graph RAG query with entity linking, subgraph traversal, and relational knowledge fusion.
+- **`GET /api/graph/data`**: Inspect all extracted knowledge graph nodes, relations, and connectivity.
+- **`POST /api/graph/build`**: Rebuild knowledge graph relationships from all indexed document chunks.
